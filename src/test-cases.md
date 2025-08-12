@@ -2,6 +2,6 @@
 
 
 ```bash
-echo 'hi?' | socat - TCP: 127.0.0.1:5882
+echo 'hi?' | socat - TCP:127.0.0.1:5882
 ```
 

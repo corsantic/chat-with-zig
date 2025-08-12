@@ -1,4 +1,6 @@
 const std = @import("std");
+const read_import = @import("reader.zig");
+const Reader = read_import.Reader;
 const net = std.net;
 const posix = std.posix;
 
@@ -37,8 +39,13 @@ pub fn main() !void {
         //Write timeout
         try posix.setsockopt(socket, posix.SOL.SOCKET, posix.SO.SNDTIMEO, &std.mem.toBytes(timeout));
 
-        // code will wait here for client
-        const read = try readMessage(socket, &buf);
+        
+        var reader = Reader{.socket = socket, .buf = &buf, .pos = 0, .start = 0};
+        
+        const read = try reader.readMessage();
+
+        // // code will wait here for client
+        // const read = try readMessage(socket, &buf);
 
         try writeMessage(socket, read);
     }
@@ -75,13 +82,26 @@ fn readAll(socket: posix.socket_t, buf: []u8) !void {
 fn writeMessage(socket: posix.socket_t, msg: []const u8) !void {
     var buf: [4]u8 = undefined;
     std.mem.writeInt(u32, &buf, @intCast(msg.len), .little);
-    try writeAll(socket, &buf);
-    try writeAll(socket, msg);
 
-    // //Delimiter
-    // if (try posix.write(socket, &[1]u8{0}) != 1) {
-    //     return error.Closed;
-    // }
+    var vec = [2]posix.iovec_const{
+        .{ .len = 4, .base = &buf },
+        .{ .len = msg.len, .base = msg.ptr },
+    };
+    try writeAllVectored(socket, &vec);
+}
+
+fn writeAllVectored(socket: posix.socket_t, vec: []posix.iovec_const) !void {
+    var i: usize = 0;
+    while (true) {
+        var n = try posix.writev(socket, vec[i..]);
+        while (n >= vec[i].len) {
+            n -= vec[i].len;
+            i += 1;
+            if (i >= vec.len) return;
+        }
+        vec[i].base += n;
+        vec[i].len -= n;
+    }
 }
 
 fn writeAll(socket: posix.socket_t, msg: []const u8) !void {
