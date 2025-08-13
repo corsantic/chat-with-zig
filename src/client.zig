@@ -7,7 +7,14 @@ pub const Client = struct {
     socket: posix.socket_t,
     address: net.Address,
 
-    pub fn handle(self: Client) !void {
+    pub fn handle(self: Client) void {
+        self._handle() catch |err| switch (err) {
+            error.Closed => {},
+            else => std.debug.print("[{any}] client handle error: {}\n", .{ self.address, err }),
+        };
+    }
+
+    fn _handle(self: Client) !void {
         const socket = self.socket;
 
         defer posix.close(socket);

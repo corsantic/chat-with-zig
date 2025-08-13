@@ -5,6 +5,12 @@ const net = std.net;
 const posix = std.posix;
 
 pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+
+    var pool: std.Thread.Pool = undefined;
+    try std.Thread.Pool.init(&pool, .{ .allocator = allocator, .n_jobs = 64 });
+
     const address = try net.Address.parseIp4("127.0.0.1", 5882);
     const tpe: u32 = posix.SOCK.STREAM;
     const protocol = posix.IPPROTO.TCP;
@@ -28,73 +34,8 @@ pub fn main() !void {
             };
 
         const client = Client{ .socket = socket, .address = client_address };
-        const thread = try std.Thread.spawn(.{}, Client.handle, .{client});
-        thread.detach();
+        try pool.spawn(Client.handle, .{client});
     }
 }
 
 
-fn readMessage(socket: posix.socket_t, buf: []u8) ![]u8 {
-    var header: [4]u8 = undefined;
-    try readAll(socket, &header);
-
-    const len = std.mem.readInt(u32, &header, .little);
-
-    if (len > buf.len) {
-        return error.BufferTooSmall;
-    }
-
-    const msg = buf[0..len];
-    try readAll(socket, msg);
-
-    return msg;
-}
-
-fn readAll(socket: posix.socket_t, buf: []u8) !void {
-    var into = buf;
-    while (into.len > 0) {
-        const n = try posix.read(socket, into);
-
-        if (n == 0) {
-            return error.Closed;
-        }
-        into = into[n..];
-    }
-}
-
-fn writeMessage(socket: posix.socket_t, msg: []const u8) !void {
-    var buf: [4]u8 = undefined;
-    std.mem.writeInt(u32, &buf, @intCast(msg.len), .little);
-
-    var vec = [2]posix.iovec_const{
-        .{ .len = 4, .base = &buf },
-        .{ .len = msg.len, .base = msg.ptr },
-    };
-    try writeAllVectored(socket, &vec);
-}
-
-fn writeAllVectored(socket: posix.socket_t, vec: []posix.iovec_const) !void {
-    var i: usize = 0;
-    while (true) {
-        var n = try posix.writev(socket, vec[i..]);
-        while (n >= vec[i].len) {
-            n -= vec[i].len;
-            i += 1;
-            if (i >= vec.len) return;
-        }
-        vec[i].base += n;
-        vec[i].len -= n;
-    }
-}
-
-fn writeAll(socket: posix.socket_t, msg: []const u8) !void {
-    var pos: usize = 0;
-    while (pos < msg.len) {
-        const written = try posix.write(socket, msg[pos..]);
-
-        if (written == 0) {
-            return error.Closed;
-        }
-        pos += written;
-    }
-}
