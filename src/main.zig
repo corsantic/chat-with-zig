@@ -1,6 +1,6 @@
 const std = @import("std");
-const read_import = @import("reader.zig");
-const Reader = read_import.Reader;
+const Reader = @import("reader.zig").Reader;
+const Client = @import("client.zig").Client;
 const net = std.net;
 const posix = std.posix;
 
@@ -17,7 +17,6 @@ pub fn main() !void {
     try posix.bind(listener, &address.any, address.getOsSockLen());
     try posix.listen(listener, 128);
 
-    var buf: [128]u8 = undefined;
     while (true) {
         var client_address: net.Address = undefined;
         var client_address_len: posix.socklen_t = @sizeOf(net.Address);
@@ -28,28 +27,12 @@ pub fn main() !void {
                 continue;
             };
 
-        defer posix.close(socket);
-
-        std.debug.print("{} connected\n", .{client_address});
-
-        const timeout = posix.timeval{ .sec = 2, .usec = 500_000 };
-
-        //Read timeout
-        try posix.setsockopt(socket, posix.SOL.SOCKET, posix.SO.RCVTIMEO, &std.mem.toBytes(timeout));
-        //Write timeout
-        try posix.setsockopt(socket, posix.SOL.SOCKET, posix.SO.SNDTIMEO, &std.mem.toBytes(timeout));
-
-        
-        var reader = Reader{.socket = socket, .buf = &buf, .pos = 0, .start = 0};
-        
-        const read = try reader.readMessage();
-
-        // // code will wait here for client
-        // const read = try readMessage(socket, &buf);
-
-        try writeMessage(socket, read);
+        const client = Client{ .socket = socket, .address = client_address };
+        const thread = try std.Thread.spawn(.{}, Client.handle, .{client});
+        thread.detach();
     }
 }
+
 
 fn readMessage(socket: posix.socket_t, buf: []u8) ![]u8 {
     var header: [4]u8 = undefined;
