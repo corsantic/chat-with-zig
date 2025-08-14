@@ -1,6 +1,7 @@
 const std = @import("std");
 const posix = std.posix;
 const net = std.net;
+const builtin = @import("builtin");
 
 pub fn main() !void {
     const address = try net.Address.parseIp4("127.0.0.1", 5882);
@@ -13,8 +14,21 @@ pub fn main() !void {
     defer posix.close(socket);
 
     try posix.connect(socket, &address.any, address.getOsSockLen());
-    try writeMessage(socket, "Hello World!");
-    try writeMessage(socket, "Its Over 9000!");
+    const stdin = std.io.getStdIn().reader();
+
+    while (true) {
+        var buf: [1024]u8 = undefined;
+        if (try stdin.readUntilDelimiterOrEof(&buf, '\n')) |line| {
+            var text = line;
+            if (builtin.os.tag == .windows) {
+                text = @constCast(std.mem.trimRight(u8, text, "\r"));
+            }
+            if (text.len == 0) {
+                break;
+            }
+            try writeMessage(socket, buf[0..text.len]);
+        }
+    }
 }
 fn writeMessage(socket: posix.socket_t, msg: []const u8) !void {
     var buf: [4]u8 = undefined;

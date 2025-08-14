@@ -1,6 +1,8 @@
 const std = @import("std");
 const posix = std.posix;
 const net = std.net;
+const Allocator = std.mem.Allocator;
+
 // @source : https://www.openmymind.net/TCP-Server-In-Zig-Part-3-Minimizing-Writes-and-Reads/
 pub const Reader = struct {
     // This is what we will read into and where we will look for a complete message
@@ -11,14 +13,21 @@ pub const Reader = struct {
     pos: usize = 0,
 
     // This is where our next message starts at
-
     start: usize = 0,
 
-    // The socket to read from
-    socket: posix.socket_t,
+    pub fn init(allocator: Allocator, size: usize) !Reader {
+        return .{
+            .pos = 0,
+            .start = 0,
+            .buf = try allocator.alloc(u8, size),
+        };
+    }
 
+    pub fn deinit(self: *const Reader, allocator: Allocator) void {
+        allocator.free(self.buf);
+    }
 
-    pub fn readMessage(self: *Reader) ![]u8 {
+    pub fn readMessage(self: *Reader, socket: posix.socket_t) ![]u8 {
         var buf = self.buf;
 
         // Loop until we have read a message, or the connection was closed
@@ -31,7 +40,7 @@ pub const Reader = struct {
             // read data from the socket, we need to read this into buf from
             // the end of where we have data (aka, self.pos)
             const pos = self.pos;
-            const n = try posix.read(self.socket, buf[pos..]);
+            const n = try posix.read(socket, buf[pos..]);
             if (n == 0) {
                 return error.Closed;
             }
