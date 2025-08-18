@@ -86,13 +86,40 @@ pub const Server = struct {
                             break;
                         };
                         std.debug.print("got: {s}\n", .{msg});
+
+                        const written = client.writeMessage(msg) catch {
+                            self.removeClient(i);
+                            break;
+                        };
+
+                        // If writeMessage didn't fully write the message, we change to
+                        // write-mode, asking to be notified of the socket's write-readiness
+                        // instead of its read-readiness.
+                        if (written == false) {
+                            self.client_polls[i].events = posix.POLL.OUT;
+                            break;
+                        }
+                        // else, the entire message was written, we stay in read-mode
+                        // and see if the client has another message ready
+                    }
+                } else if (revents & posix.POLL.OUT == posix.POLL.OUT) {
+                    // This whole block is new. This means that socket was previously put
+                    // into write-mode and that it is now ready. We write what we can.
+                    const written = client.write() catch {
+                        self.removeClient(i);
+                        continue;
+                    };
+                    if (written) {
+                        // and if the entire message was written, we revert to read-mode.
+                        self.client_polls[i].events = posix.POLL.IN;
                     }
                 }
             }
         }
     }
     fn accept(self: *Server, listener: posix.socket_t) !void {
-        while (true) {
+        const available = self.client_polls.len - self.connected;
+        for (0..available) |_| {
             // we'll continue to accept until we get error.WouldBlock
             // or until our program crashes because we overflow self.clients and self.polls
             // (we really should fix that!)
@@ -112,6 +139,9 @@ pub const Server = struct {
             self.clients[connected] = client;
             self.client_polls[connected] = .{ .fd = socket, .events = posix.POLL.IN, .revents = 0 };
             self.connected = connected + 1;
+        } else {
+            //polls[0] is _always_ the listening socket
+            disableListeningSocket();
         }
     }
 
@@ -128,6 +158,13 @@ pub const Server = struct {
         self.client_polls[at] = self.client_polls[last_index];
 
         self.connected = last_index;
+        enableListeningSocket();
+    }
+    fn disableListeningSocket(self: *Server) void {
+        self.polls[0].events = 0;
+    }
+    fn enableListeningSocket(self: *Server) void {
+        self.polls[0].events = posix.POLL.IN;
     }
 
     pub fn deinit(self: *Server) void {
